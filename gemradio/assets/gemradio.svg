@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="case" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6b4a2f"/>
+      <stop offset="0.5" stop-color="#4d3320"/>
+      <stop offset="1" stop-color="#2f1f14"/>
+    </linearGradient>
+    <linearGradient id="dial" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd489"/>
+      <stop offset="1" stop-color="#d9962f"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffbe52" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="#ffbe52" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- wooden case -->
+  <rect x="8" y="26" width="112" height="82" rx="12" fill="url(#case)"
+        stroke="#8a6134" stroke-width="2.5"/>
+
+  <!-- antenna -->
+  <line x1="92" y1="26" x2="112" y2="6" stroke="#c9a35f" stroke-width="4"
+        stroke-linecap="round"/>
+  <circle cx="113" cy="5" r="4" fill="#e6c079"/>
+
+  <!-- speaker grille -->
+  <rect x="18" y="38" width="46" height="58" rx="7" fill="#241811"
+        stroke="#7d5730" stroke-width="1.8"/>
+  <g fill="#6d4d2b">
+    <circle cx="28" cy="49" r="2.4"/><circle cx="41" cy="49" r="2.4"/><circle cx="54" cy="49" r="2.4"/>
+    <circle cx="28" cy="62" r="2.4"/><circle cx="41" cy="62" r="2.4"/><circle cx="54" cy="62" r="2.4"/>
+    <circle cx="28" cy="75" r="2.4"/><circle cx="41" cy="75" r="2.4"/><circle cx="54" cy="75" r="2.4"/>
+    <circle cx="28" cy="88" r="2.4"/><circle cx="41" cy="88" r="2.4"/><circle cx="54" cy="88" r="2.4"/>
+  </g>
+
+  <!-- lit tuning dial -->
+  <ellipse cx="90" cy="56" rx="26" ry="18" fill="url(#glow)"/>
+  <rect x="70" y="42" width="40" height="26" rx="5" fill="#1d150f"
+        stroke="#9c7038" stroke-width="1.8"/>
+  <rect x="72" y="44" width="36" height="22" rx="4" fill="url(#dial)" opacity="0.28"/>
+  <g stroke="#ffc978" stroke-width="1.4" stroke-linecap="round">
+    <line x1="77" y1="48" x2="77" y2="55"/>
+    <line x1="84" y1="48" x2="84" y2="52"/>
+    <line x1="91" y1="48" x2="91" y2="55"/>
+    <line x1="98" y1="48" x2="98" y2="52"/>
+    <line x1="105" y1="48" x2="105" y2="55"/>
+  </g>
+  <line x1="95" y1="45" x2="95" y2="65" stroke="#ff5f3c" stroke-width="2.2"
+        stroke-linecap="round"/>
+
+  <!-- tuning knobs -->
+  <circle cx="80" cy="88" r="9" fill="#3a2718" stroke="#a87a41" stroke-width="2"/>
+  <line x1="80" y1="88" x2="80" y2="81" stroke="#e8c78a" stroke-width="2"
+        stroke-linecap="round"/>
+  <circle cx="104" cy="88" r="9" fill="#3a2718" stroke="#a87a41" stroke-width="2"/>
+  <line x1="104" y1="88" x2="109" y2="83" stroke="#e8c78a" stroke-width="2"
+        stroke-linecap="round"/>
+
+  <!-- feet -->
+  <rect x="24" y="108" width="14" height="6" rx="3" fill="#2a1c12"/>
+  <rect x="90" y="108" width="14" height="6" rx="3" fill="#2a1c12"/>
+</svg>

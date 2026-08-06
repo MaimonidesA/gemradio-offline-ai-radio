@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Local state, caches and logs — never part of the repository
+*.db
+*.db-wal
+*.db-shm
+*.log
+*.wav
+*.npy
