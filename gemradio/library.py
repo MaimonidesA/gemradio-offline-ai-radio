@@ -52,6 +52,18 @@ CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT
 );
+
+-- How to say a record's artist and title out loud in a given show language.
+-- Filled by the DJ model on demand and kept, since a title only has to be
+-- worked out once per language.
+CREATE TABLE IF NOT EXISTS spoken_names (
+    path    TEXT NOT NULL,
+    lang    TEXT NOT NULL,
+    artist  TEXT,
+    title   TEXT,
+    meaning TEXT,
+    PRIMARY KEY (path, lang)
+);
 """
 
 
@@ -65,10 +77,33 @@ _HEBREW = re.compile(r"[֐-׿]")
 _MOJIBAKE_HINT = re.compile(r"[À-ÿ]{2,}")
 
 
+# The opposite mistake to the one below: a European title whose accented bytes
+# were read through the Hebrew codepage, so "Le théâtre" arrives as
+# "Le thיגtre".  The giveaway is a Hebrew letter sitting *inside* a Latin word;
+# a genuinely Hebrew title has Hebrew as whole words, never welded to Latin
+# ones, so this cannot fire on real Hebrew.
+_ACCENT_AS_HEBREW = re.compile(r"(?:[A-Za-z][֐-׿])|(?:[֐-׿][A-Za-z])")
+
+
+def _repair_accents_read_as_hebrew(text: str) -> str | None:
+    if not _ACCENT_AS_HEBREW.search(text):
+        return None
+    try:
+        candidate = text.encode("cp1255").decode("cp1252")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return None
+    if _HEBREW.search(candidate):
+        return None
+    return candidate
+
+
 def repair_text(value: str) -> str:
     if not value:
         return ""
     text = value.strip()
+    recovered = _repair_accents_read_as_hebrew(text)
+    if recovered:
+        return recovered.strip()
     if not text or not _MOJIBAKE_HINT.search(text):
         return text
     for codec in ("cp1255", "cp1251"):
@@ -207,10 +242,13 @@ class Track:
 
 def _row_to_track(row: sqlite3.Row) -> Track:
     # Cleaning on read as well as on write means an index built by an earlier
-    # version does not need a full rescan to stop saying "(MP3@320Kbps)".
+    # version does not need a full rescan to stop saying "(MP3@320Kbps)" or to
+    # recover a title whose accents were read through the wrong codepage.
     return Track(
-        path=row["path"], folder=row["folder"] or "", title=row["title"] or "",
-        artist=clean_artist(row["artist"] or ""), album=row["album"] or "",
+        path=row["path"], folder=row["folder"] or "",
+        title=repair_text(row["title"] or ""),
+        artist=clean_artist(repair_text(row["artist"] or "")),
+        album=repair_text(row["album"] or ""),
         genre=row["genre"] or "",
         year=row["year"] or "", duration=row["duration"] or 0.0, cover=row["cover"] or "",
         lyric=row["lyric"] or "", lyric_lang=row["lyric_lang"] or "",
@@ -507,6 +545,30 @@ class Library:
             conn.execute(
                 "UPDATE tracks SET play_count = play_count + 1, last_played = ? WHERE path = ?",
                 (time.time(), path),
+            )
+            conn.commit()
+
+    def get_spoken_name(self, path: str, lang: str) -> dict | None:
+        row = self._conn().execute(
+            "SELECT artist, title, meaning FROM spoken_names WHERE path = ? AND lang = ?",
+            (path, lang),
+        ).fetchone()
+        if not row:
+            return None
+        return {"artist": row["artist"] or "", "title": row["title"] or "",
+                "meaning": row["meaning"] or ""}
+
+    def store_spoken_name(self, path: str, lang: str, artist: str, title: str,
+                          meaning: str) -> None:
+        with self._write_lock:
+            conn = self._conn()
+            conn.execute(
+                """INSERT INTO spoken_names (path, lang, artist, title, meaning)
+                   VALUES (?,?,?,?,?)
+                   ON CONFLICT(path, lang) DO UPDATE SET
+                     artist=excluded.artist, title=excluded.title,
+                     meaning=excluded.meaning""",
+                (path, lang, artist, title, meaning),
             )
             conn.commit()
 

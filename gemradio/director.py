@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 from . import config
 from .library import Library, Track, has_unspeakable_script
-from .llm import SCRIPT_SCHEMA, SHOW_SCHEMA, Ollama
+from .llm import NAME_SCHEMA, SCRIPT_SCHEMA, SHOW_SCHEMA, Ollama
 from .logging_util import get_logger
 
 log = get_logger(__name__)
@@ -258,6 +258,76 @@ class Director:
             return True
         return False
 
+    # -- foreign names ------------------------------------------------------
+    def spoken_name(self, track: Track, language: str) -> dict | None:
+        """How to say this record's artist and title in the show's language.
+
+        Titles in this library are written in Hebrew, French, English and more.
+        A voice can only read the script it was trained on, so anything else is
+        sent to the model, which returns a romanization the announcer can
+        actually pronounce plus a short gloss of what the title means — which
+        is usually more interesting to a listener than the original anyway.
+
+        Kept in the library once worked out, since the answer never changes.
+        """
+        if not self.profile.render_names or not self.brain.available:
+            return None
+        if not (has_unspeakable_script(track.name)
+                or has_unspeakable_script(track.artist)):
+            return None
+
+        cached = self.library.get_spoken_name(track.path, language)
+        if cached is not None:
+            return cached or None
+
+        # Framed strictly as transliteration.  Asked more loosely, the model
+        # "recognises" a name instead of spelling it out — פורטיסחרוב came back
+        # as Portishead, a different and far better known band.
+        system = (
+            "You transliterate names for a radio announcer. This is a mechanical "
+            "letter-by-letter task, NOT identification.\n"
+            "- 'artist' and 'title': write the SOUNDS of the original letters using "
+            f"the Latin alphabet, spelled so a {LANGUAGE_FULL[language]} speaker "
+            "reads them correctly. Keep any part already in Latin letters exactly "
+            "as it is.\n"
+            "- NEVER output the name of a different artist, band or song, however "
+            "similar it sounds or however famous it is. You are not being asked "
+            "which artist this is. If the transliteration looks like a well known "
+            "name, that is a coincidence — write what the letters actually say.\n"
+            "- 'meaning': what the title means, in at most six words in "
+            f"{LANGUAGE_FULL[language]}. Leave it empty if you cannot tell.\n"
+            "Never reply in the original script. Output only these fields.\n\n"
+            "Worked example of the trap to avoid:\n"
+            "  Artist: פורטיסחרוב\n"
+            "  Correct -> Fortis Charov   (the letters are f-o-r-t-i-s-ch-r-o-v)\n"
+            "  Wrong   -> Portishead      (a different band that sounds similar)\n"
+            "Another:\n"
+            "  Artist: חוה אלברשטיין\n"
+            "  Correct -> Chava Alberstein"
+        )
+        user = f"Artist: {track.artist or 'unknown'}\nTitle: {track.name}"
+        data = self.brain.chat_json(system, user, NAME_SCHEMA, temperature=0.15,
+                                    num_predict=180, num_ctx=self.profile.num_ctx)
+
+        rendered = {"artist": "", "title": "", "meaning": ""}
+        if data:
+            for key in rendered:
+                value = _clean_speech(str(data.get(key, "")))[:80]
+                # A model that answers in the original script has not helped.
+                rendered[key] = "" if has_unspeakable_script(value) else value
+        if not rendered["title"]:
+            # Remember the failure too, so it is not retried every rotation.
+            self.library.store_spoken_name(track.path, language, "", "", "")
+            log.info("no speakable rendering for %s", track.display)
+            return None
+
+        self.library.store_spoken_name(track.path, language, rendered["artist"],
+                                       rendered["title"], rendered["meaning"])
+        log.info("spoken name [%s]: %s — %s%s", language,
+                 rendered["artist"], rendered["title"],
+                 f"  ({rendered['meaning']})" if rendered["meaning"] else "")
+        return rendered
+
     # -- host casting -------------------------------------------------------
     def hosts(self, language: str) -> tuple[str | None, str | None]:
         female = config.pick_voice(language, "F")
@@ -367,6 +437,21 @@ class Director:
 
         if current is not None:
             parts.append(f"Record now ending: {current.describe()}")
+            if has_unspeakable_script(current.name) or has_unspeakable_script(current.artist):
+                spoken_out = self.spoken_name(current, language)
+                if spoken_out:
+                    parts.append(
+                        "If you refer to the record that is ending, say it as "
+                        f'"{spoken_out["artist"] or current.artist}" — '
+                        f'"{spoken_out["title"]}", never in the original script, '
+                        "and never replace it with a different or better known "
+                        "artist that happens to sound similar."
+                    )
+                else:
+                    parts.append(
+                        "The record that is ending is titled in a script the "
+                        "announcer cannot read; refer to it without naming it."
+                    )
         if upcoming is not None:
             parts.append(f"Record coming next: {upcoming.describe()}")
             if upcoming.lyric:
@@ -383,9 +468,24 @@ class Director:
         if upcoming is not None:
             unspeakable = (has_unspeakable_script(upcoming.name)
                            or has_unspeakable_script(upcoming.artist))
-            if unspeakable:
-                # The voice would only produce noise trying to read this, so ask
-                # for the record to be introduced without being named.
+            spoken = self.spoken_name(upcoming, language) if unspeakable else None
+            if spoken:
+                artist = spoken["artist"] or upcoming.artist
+                line = (
+                    "The next record's name is written in another script. Say it "
+                    f'as: artist "{artist}", title "{spoken["title"]}". Use exactly '
+                    "those spellings — they are what the announcer can pronounce — "
+                    "and do not write the original script. Never substitute a "
+                    "different or more famous artist whose name sounds similar; "
+                    "this is a real record and its name is the one given here."
+                )
+                if spoken.get("meaning"):
+                    line += (f' The title means roughly "{spoken["meaning"]}"; '
+                             "mention that only if it fits naturally.")
+                parts.append(line)
+            elif unspeakable:
+                # Nothing sayable came back, so the record is introduced without
+                # a name rather than as noise.
                 parts.append(
                     "The next record's artist and title are written in a script "
                     f"the announcer cannot pronounce ({LANGUAGE_FULL[language]} "

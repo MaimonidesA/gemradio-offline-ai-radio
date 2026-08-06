@@ -120,6 +120,38 @@ class Ollama:
             return f"{round(100 * vram / total)}% GPU"
         return ""
 
+    @staticmethod
+    def gpu_report() -> list[str]:
+        """What the NVIDIA driver says, so 'is it on the GPU' has a real answer.
+
+        A laptop with switchable graphics has two GPUs, and Ollama only ever
+        uses the NVIDIA one (it needs CUDA); this shows which card holds the
+        model rather than leaving it to be inferred.
+        """
+        import shutil as _shutil
+        import subprocess as _subprocess
+
+        if not _shutil.which("nvidia-smi"):
+            return []
+        lines: list[str] = []
+        try:
+            gpus = _subprocess.run(
+                ["nvidia-smi", "--query-gpu=name,memory.used,memory.total",
+                 "--format=csv,noheader"],
+                capture_output=True, text=True, timeout=10).stdout.strip()
+            for row in filter(None, gpus.splitlines()):
+                lines.append(row.strip())
+            apps = _subprocess.run(
+                ["nvidia-smi", "--query-compute-apps=process_name,used_memory",
+                 "--format=csv,noheader"],
+                capture_output=True, text=True, timeout=10).stdout.strip()
+            for row in filter(None, apps.splitlines()):
+                if "ollama" in row or "llama" in row:
+                    lines.append(f"resident: {row.strip()}")
+        except Exception:
+            return lines
+        return lines
+
     def set_model(self, name: str) -> None:
         if name and name != self.model:
             log.info("DJ brain switching to %s", name)
@@ -238,6 +270,17 @@ SCRIPT_SCHEMA = {
         }
     },
     "required": ["lines"],
+}
+
+# How to say a foreign artist and title out loud, plus what the title means.
+NAME_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "artist": {"type": "string"},
+        "title": {"type": "string"},
+        "meaning": {"type": "string"},
+    },
+    "required": ["artist", "title"],
 }
 
 SHOW_SCHEMA = {

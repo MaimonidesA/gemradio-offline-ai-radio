@@ -218,6 +218,17 @@ Check what your own daemon defaults to:
 systemctl show ollama --property=Environment | tr ' ' '\n' | grep -i context
 ```
 
+On a laptop with switchable graphics there are two GPUs, an integrated one and
+the discrete card. **Ollama only ever uses the NVIDIA card** — it needs CUDA and
+cannot use an Intel or AMD integrated GPU — so if it reports a GPU at all, that
+is the discrete one. `doctor` names it outright and shows the inference process
+resident on it:
+
+```
+gpu: NVIDIA GeForce RTX 4070 Laptop GPU, 6495 MiB, 8188 MiB
+gpu: resident: /usr/local/lib/ollama/llama-server, 6478 MiB
+```
+
 And confirm where a model actually landed — the `PROCESSOR` column is the truth:
 
 ```bash

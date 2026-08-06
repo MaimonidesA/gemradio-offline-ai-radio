@@ -169,6 +169,7 @@ class Profile:
     num_ctx: int
     block_tracks: tuple[int, int]  # records per show before a new identity
     llm_show_names: bool
+    render_names: bool            # ask the model how to say foreign titles
     max_lines: int                # how many spoken lines a link may run to
     words_per_line: int
     total_words: int              # budget for the whole link, all lines together
@@ -188,6 +189,7 @@ PROFILES: dict[str, Profile] = {
         num_ctx=OLLAMA_NUM_CTX,
         block_tracks=(BLOCK_MIN_TRACKS, BLOCK_MAX_TRACKS),
         llm_show_names=True,
+        render_names=True,
         max_lines=3,
         words_per_line=26,
         total_words=58,
@@ -206,6 +208,7 @@ PROFILES: dict[str, Profile] = {
         num_ctx=4096,
         block_tracks=(10, 16),
         llm_show_names=False,
+        render_names=False,
         max_lines=1,
         words_per_line=30,
         total_words=30,

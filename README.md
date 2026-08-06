@@ -127,6 +127,31 @@ ollama ps                     # should list nothing
 pgrep -af "piper_worker|paplay"   # should print nothing
 ```
 
+## Titles the announcer cannot read
+
+A personal collection is not all in one language. This one holds Hebrew, French
+and English titles side by side, and a Piper voice can only read the script it
+was trained on — hand it Hebrew and it produces noise.
+
+So in full power the title goes to Gemma first, which returns the name written
+the way the announcer should *say* it, plus what it means:
+
+| In the file | On air (English show) | Meaning |
+|---|---|---|
+| גלי עטרי — תני לו פרח | Gali Atri — Tani Lo Perach | *Give him a flower* |
+| שוטי הנבואה — ידיעה | Shoti HaNevua — Yedi'ah | |
+
+The rendering is per language — a French show says *Choti HaNevouah* — and is
+kept in the library once worked out, so each title costs one call ever. If
+nothing sayable comes back, the DJ introduces the record without naming it
+rather than reading gibberish. Low power skips this and simply does not name
+those records.
+
+Tags also arrive mis-decoded in both directions, and both are repaired on read:
+Hebrew written through Latin-1 (`àçøéú äéîéí` → `אחרית הימים`), and European
+accents read through the Hebrew codepage (`Le thיגtre des poissons` →
+`Le théâtre des poissons`).
+
 ### Shows
 
 Records are grouped into blocks of 5–9 tracks. Each block is a "show" with a

@@ -58,6 +58,8 @@ def cmd_doctor() -> int:
         placement = brain.placement()
         if placement:
             print(f"          currently loaded on: {placement}")
+    for line in brain.gpu_report():
+        print(f"          gpu: {line}")
 
     try:
         from .audio import AudioEngine
