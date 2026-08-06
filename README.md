@@ -59,19 +59,41 @@ sometimes run as a duet — two hosts trading a line each over the handover.
 Italian has one voice, so Italian shows are always solo. The station never
 tries to fake a voice it does not have.
 
-## Low power
+## Full power and low power
 
 The **LOW POWER** button on the panel (or `--low-power`) changes how hard the
 station works, while it stays on air:
 
-| | Full | Low power |
+| | Full power | Low power |
 |---|---|---|
-| Model | your configured model | **smallest one installed** |
-| DJ speaks | every 1–2 records | every 3–5 records |
+| Model | `gemma4:12b-it-qat` | **smallest one installed** |
+| Runs on | 76% GPU, 8.5 GB VRAM | 100% GPU, 3.1 GB VRAM |
+| DJ speaks | every 2–3 records | every 3–5 records |
+| Link length | up to 3 lines, 55 words each | 1 line, 32 words |
 | Voices at once | up to two | one |
 | Whisper listening | on | off |
 | Records per show | 5–9 | 10–16 |
 | Show names | written by Gemma | from a curated list |
+
+Full power is the larger model writing a real link — what the record that just
+ended was doing, what is coming next and why to stay for it, with room for a
+dry aside. Low power plans a longer run of music and says less about it.
+
+### Making sure it is really on the GPU
+
+This is worth checking, because getting it wrong is silent and costs 4× the
+speed. The status bar shows it next to the model name, `doctor` prints it, and
+the log records it when a link is generated:
+
+```
+model gemma4:12b-it-qat running on 76% GPU
+```
+
+The trap is context length — see [SETUP.md](SETUP.md#5-gpu-notes). Ollama sizes
+its KV cache from it, so a machine-wide `OLLAMA_CONTEXT_LENGTH=16384` pushed
+this 12B model out of 8 GB of VRAM and onto the CPU, at 6.7 tok/s instead of 28.
+GemRadio now sends its own `num_ctx` on every request so it can never inherit
+that.
 
 The point is that it plans a longer run of music at a time and thinks less
 often, rather than degrading how it sounds. Switching mid-broadcast is safe:
@@ -134,6 +156,8 @@ Everything is an environment variable; nothing needs a code change.
 
 ```bash
 GEMRADIO_PROFILE=low        ./run_gemradio.sh   # start in low power
+GEMRADIO_OLLAMA_MODEL=gemma4:26b ./run_gemradio.sh  # full power's model
+GEMRADIO_NUM_CTX=4096       ./run_gemradio.sh   # smaller window, more GPU headroom
 GEMRADIO_KEEP_ALIVE=0       ./run_gemradio.sh   # never let Ollama hold the model
 GEMRADIO_CROSSFADE=9        ./run_gemradio.sh   # longer crossfades
 GEMRADIO_DUCK_LEVEL=0.12    ./run_gemradio.sh   # push music further down under speech

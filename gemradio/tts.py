@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 
 from . import config
+from .library import has_unspeakable_script, strip_unspeakable
 from .audio import CH, SR, VoiceItem
 from .logging_util import get_logger
 
@@ -51,10 +52,17 @@ _SPOKEN_FIXES = (
 )
 
 
-def spoken_form(text: str) -> str:
+def spoken_form(text: str, language: str = "") -> str:
     for src, dst in _SPOKEN_FIXES:
         if src:
             text = text.replace(src, dst)
+    # Last line of defence: a Hebrew or Cyrillic run reaching a Latin-script
+    # voice comes out as noise, so drop it even if the model slipped one in.
+    if language in ("en", "fr", "it") and has_unspeakable_script(text):
+        cleaned = strip_unspeakable(text)
+        if len(cleaned.split()) >= 3:
+            log.info("stripped an unpronounceable run from: %.70s", text)
+            text = cleaned
     return text
 
 
@@ -168,7 +176,7 @@ class PiperTTS:
         text = (text or "").strip()
         if not text:
             return None
-        text = spoken_form(text)
+        text = spoken_form(text, voice.language)
 
         scale = length_scale if length_scale is not None else voice.length_scale
         digest = hashlib.sha1(
@@ -229,29 +237,59 @@ class PiperTTS:
         return pad
 
     # -- convenience --------------------------------------------------------
-    def make_items(self, lines: list[tuple[str, str]],
-                   gap: float = 0.32) -> tuple[list[VoiceItem], float]:
+    def make_items(self, lines: list[tuple[str, str]], gap: float = 0.32,
+                   max_seconds: float = 0.0) -> tuple[list[VoiceItem], float]:
         """Synthesize (voice_key, text) pairs into mixer items.
 
         Returns the items and their total wall-clock duration including gaps.
+        A link that would run past `max_seconds` is cut short rather than
+        allowed to overrun the end of the record it plays over.
         """
         items: list[VoiceItem] = []
-        total = 0.0
         for idx, (voice_key, text) in enumerate(lines):
             utt = self.synthesize(text, voice_key)
             if utt is None:
                 continue
-            last = idx == len(lines) - 1
-            gap_after = 0.0 if last else gap
             items.append(VoiceItem(
                 audio=utt.audio,
-                gap_after=gap_after,
+                gap_after=gap,
                 meta={"text": text, "voice": voice_key,
                       "display": (utt.voice.display if utt.voice else voice_key),
-                      "index": idx, "last": last},
+                      "index": idx, "last": False},
             ))
-            total += utt.duration + gap_after
-        return items, total
+
+        if max_seconds:
+            items = self._fit_to_budget(items, max_seconds, gap)
+        return items, self._finalize(items)
+
+    @staticmethod
+    def _fit_to_budget(items: list[VoiceItem], max_seconds: float,
+                       gap: float) -> list[VoiceItem]:
+        """Drop lines from the middle until the link fits the budget.
+
+        The last line is the one that announces the record coming next and the
+        first sets up the handover, so when something has to go it is taken
+        from between them rather than off the end.
+        """
+        def duration(seq: list[VoiceItem]) -> float:
+            return sum(i.audio.shape[0] / SR for i in seq) + gap * max(0, len(seq) - 1)
+
+        while len(items) > 1 and duration(items) > max_seconds:
+            drop = 1 if len(items) > 2 else 0
+            dropped = items.pop(drop)
+            log.info("link over the %.0fs cap: dropped line %d (%.60s…)",
+                     max_seconds, dropped.meta.get("index", drop),
+                     dropped.meta.get("text", ""))
+        return items
+
+    @staticmethod
+    def _finalize(items: list[VoiceItem]) -> float:
+        """Close the last line's gap and return the link's true duration."""
+        if not items:
+            return 0.0
+        items[-1].gap_after = 0.0
+        items[-1].meta["last"] = True
+        return sum(i.audio.shape[0] / SR + i.gap_after for i in items)
 
     def warm_up(self, voice_keys: list[str]) -> None:
         """Pre-load models so the first on-air line is not delayed."""

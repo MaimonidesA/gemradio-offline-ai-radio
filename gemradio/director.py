@@ -17,7 +17,7 @@ import threading
 from dataclasses import dataclass, field
 
 from . import config
-from .library import Library, Track
+from .library import Library, Track, has_unspeakable_script
 from .llm import SCRIPT_SCHEMA, SHOW_SCHEMA, Ollama
 from .logging_util import get_logger
 
@@ -95,11 +95,16 @@ bossa nova, chanson, blues, folk, world music, classical and more.
 House style — this matters:
 - Warm, unhurried, curious. Never shouty, never salesy, no radio cliches.
 - Speak like a person who loves the record, not like an announcer reading ads.
-- SHORT. Each line is one or two sentences, {words} words at most.
-- Talk about mood, texture, the time of day, the move from one track to the next.
+- Dry, light humour is welcome — an aside, a wry observation, a bit of \
+affection for the music. Never a joke with a punchline, never zany.
+- Each line is at most {words} words, and the whole link together must stay \
+under {total} words. It plays over the closing seconds of a record, so it has \
+to land before the next one starts. Say something real inside that budget.
+- Give the listener something to hold on to: what the record sounds like, what \
+it does to a room, how it sits against the one before it, the time of day.
 - Use ONLY the facts you are given. Never invent biography, chart positions, \
 recording dates, anecdotes or awards. If you know nothing about a record, \
-speak about how it sounds instead.
+speak about how it sounds instead — that is always honest and always enough.
 - No emoji, no stage directions, no asterisks, no quotation marks around your \
 own speech. Plain spoken words only, since this is read aloud.
 - Never mention that you are an AI or a language model.
@@ -227,7 +232,8 @@ class Director:
             f"It is {part_of_day()}. Name the programme that will play these records:\n"
             f"{listing}\n\nRespond with show_name, tagline, and language set to '{language}'."
         )
-        data = self.brain.chat_json(system, user, SHOW_SCHEMA, temperature=1.0, num_predict=160)
+        data = self.brain.chat_json(system, user, SHOW_SCHEMA, temperature=1.0,
+                                    num_predict=160, num_ctx=self.profile.num_ctx)
         if not data:
             return None
         name = _clean_speech(str(data.get("show_name", "")))[:40]
@@ -277,7 +283,7 @@ class Director:
             self.profile.allow_duet
             and kind in {"transition", "open"}
             and self.can_duet(language)
-            and self.rng.random() < (0.45 if language == "en" else 0.25)
+            and self.rng.random() < (0.55 if language == "en" else 0.35)
         )
 
         lines = self._llm_script(kind, current, upcoming, show, duet)
@@ -304,19 +310,30 @@ class Director:
         if not self.brain.available:
             return []
         language = show.language
-        words = 30 if duet else 40
+        profile = self.profile
+        lines_wanted = min(profile.max_lines, 2 if duet else profile.max_lines)
         system = STATION_STYLE.format(
             station=config.STATION_NAME,
-            words=words,
+            words=profile.words_per_line,
+            total=profile.total_words,
             language_name=LANGUAGE_FULL[language],
         )
         if duet:
             system += (
-                "\n\nTwo hosts are on air: F (a woman) and M (a man). Write exactly two "
-                "lines that answer each other naturally, alternating speakers. They are "
-                "colleagues who like each other; keep it light and brief. The FIRST line "
-                "reacts to the record that is ending; the SECOND line must announce the "
-                "record that is coming next and say its artist and title."
+                f"\n\nTwo hosts are on air: F (a woman) and M (a man). Write exactly "
+                f"{lines_wanted} lines that answer each other naturally, alternating "
+                "speakers. They are colleagues who like each other and have done this "
+                "for years, so let one gently tease or agree with the other. The FIRST "
+                "line reacts to the record that is ending and says something about it; "
+                "the LAST line announces the record coming next, with its artist and "
+                "title, and gives the listener a reason to stay for it."
+            )
+        elif lines_wanted > 1:
+            system += (
+                f"\n\nOne host is on air. Write {lines_wanted} lines that run on from "
+                "each other as continuous speech. Spend the first on the record that is "
+                "ending — what it did, how it sounded — and the last on the record "
+                "coming next, named with its artist and title."
             )
         else:
             system += (
@@ -364,31 +381,46 @@ class Director:
                 parts.append(f"Earlier in this programme: {recent}.")
 
         if upcoming is not None:
-            parts.append(
-                f'Name the next record inside your speech, naturally: the artist is '
-                f'{upcoming.artist or "unknown"} and the title is "{upcoming.name}". '
-                "Use that exact title — never put the album name in its place, and "
-                "never change or translate the title."
-            )
+            unspeakable = (has_unspeakable_script(upcoming.name)
+                           or has_unspeakable_script(upcoming.artist))
+            if unspeakable:
+                # The voice would only produce noise trying to read this, so ask
+                # for the record to be introduced without being named.
+                parts.append(
+                    "The next record's artist and title are written in a script "
+                    f"the announcer cannot pronounce ({LANGUAGE_FULL[language]} "
+                    "voice). Do NOT write out their names or attempt to "
+                    "transliterate them. Introduce the record without naming it — "
+                    "speak about its sound, its mood, or where it comes from."
+                )
+            else:
+                parts.append(
+                    f'Name the next record inside your speech, naturally: the artist '
+                    f'is {upcoming.artist or "unknown"} and the title is '
+                    f'"{upcoming.name}". Use that exact title — never put the album '
+                    "name in its place, and never change or translate the title."
+                )
         else:
             parts.append("Do not invent a title.")
 
         data = self.brain.chat_json(
             system, "\n".join(parts), SCRIPT_SCHEMA,
-            temperature=0.98, num_predict=self.profile.num_predict,
+            temperature=0.98, num_predict=profile.num_predict,
+            num_ctx=profile.num_ctx,
         )
         if not data:
             return []
         raw = data.get("lines") or []
         out: list[tuple[str, str]] = []
-        for item in raw[: (2 if duet else 1)]:
+        for item in raw[:lines_wanted]:
             if not isinstance(item, dict):
                 continue
             text = _clean_speech(str(item.get("text", "")))
             if not text:
                 continue
             speaker = str(item.get("speaker", "F")).upper()[:1]
-            out.append((speaker if speaker in ("F", "M") else "F", _limit_words(text, 55)))
+            out.append((speaker if speaker in ("F", "M") else "F",
+                        _limit_words(text, profile.words_per_line + 6)))
         return out
 
     def _fallback_lines(self, kind: str, current: Track | None,

@@ -110,6 +110,33 @@ _RELEASE_JUNK = re.compile(
 )
 
 
+# Scripts none of the English/French/Italian voices can pronounce.  This
+# library is full of Hebrew titles, and handing them to an Italian voice
+# produces noise, so the DJ is told to talk around them instead.
+_NON_LATIN = re.compile(
+    r"[֐-׿"      # Hebrew
+    r"؀-ۿ"       # Arabic
+    r"Ѐ-ӿ"       # Cyrillic
+    r"Ͱ-Ͽ"       # Greek
+    r"一-鿿"       # CJK
+    r"぀-ヿ"       # kana
+    r"가-힯]"      # Hangul
+)
+
+
+def has_unspeakable_script(text: str) -> bool:
+    return bool(_NON_LATIN.search(text or ""))
+
+
+def strip_unspeakable(text: str) -> str:
+    """Remove runs the Latin-script voices cannot read, tidying what is left."""
+    cleaned = _NON_LATIN.sub(" ", text or "")
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    cleaned = re.sub(r"\s+([,.!?;:])", r"\1", cleaned)
+    cleaned = re.sub(r"([\"'“”«»])\s*\1", "", cleaned)
+    return cleaned.strip(" ,;:-–—\"'")
+
+
 def clean_artist(name: str) -> str:
     """Make a folder-derived artist name safe to say out loud."""
     if not name:

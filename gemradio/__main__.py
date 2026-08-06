@@ -51,7 +51,12 @@ def cmd_doctor() -> int:
         print(f"          {m['name']:<22} {m['parameters'] or '?'}B"
               f"  {m['size'] / 1e9:.1f} GB")
     if models:
-        print(f"          low power would use: {brain.smallest_model()}")
+        full = config.PROFILES["full"]
+        print(f"          full power uses:  {full.model}  (num_ctx {full.num_ctx})")
+        print(f"          low power uses:   {brain.smallest_model()}")
+        placement = brain.placement()
+        if placement:
+            print(f"          currently loaded on: {placement}")
 
     try:
         from .audio import AudioEngine

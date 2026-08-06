@@ -85,6 +85,7 @@ class Station:
         self._segments_prepared = 0
         self._dead_air_since = 0.0
         self._shutdown_done = False
+        self._placement = ""
         self._speech_log: list[tuple[str, str]] = []
 
     # ------------------------------------------------------------------
@@ -103,6 +104,7 @@ class Station:
         with self._lock:
             self.profile = profile
             self.director.profile = profile
+            self._placement = ""
         self._apply_profile_model()
         log.info("profile: %s (%s)", profile.label, self.brain.model)
 
@@ -249,12 +251,22 @@ class Station:
             if not seg.consumed and self._running:
                 script = self.director.build_script(seg.kind, previous, track, show)
                 if script.lines and not seg.consumed:
-                    items, total = self.tts.make_items(script.lines)
+                    items, total = self.tts.make_items(
+                        script.lines, max_seconds=self.profile.max_speech_seconds)
                     seg.script = script
                     seg.items = items
                     seg.speech_seconds = total
                     log.info("link ready (%s, %s, %.1fs): %s",
                              seg.kind, script.source, total, script.text[:120])
+                    # Refreshed here rather than on the UI timer: the answer
+                    # only changes when the model is (re)loaded, and asking on
+                    # every repaint would hammer the daemon.
+                    if script.source == "gemma":
+                        placement = self.brain.placement()
+                        if placement and placement != self._placement:
+                            self._placement = placement
+                            log.info("model %s running on %s",
+                                     self.brain.model, placement)
         if seg.consumed:
             log.debug("segment for %s went on air before its link was ready",
                       track.display)
@@ -478,6 +490,7 @@ class Station:
             "profile": self.profile.key,
             "profile_label": self.profile.label,
             "model": self.brain.model,
+            "placement": self._placement,
             "running": self._running,
             "phase": phase,
             "status": status,

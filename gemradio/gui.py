@@ -638,7 +638,10 @@ class RadioWindow(QWidget):
         if s["scanning"]:
             done, total = s["scan_progress"]
             status.append(f"indexing {done}/{total}")
-        status.append(f"DJ: {s['model'] or s['brain']}")
+        dj = s['model'] or s['brain']
+        if s.get('placement'):
+            dj = f"{dj} · {s['placement']}"
+        status.append(f"DJ: {dj}")
         self.status_label.setText("   |   ".join(status))
 
     def closeEvent(self, event):

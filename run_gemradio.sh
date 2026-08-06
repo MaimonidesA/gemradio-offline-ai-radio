@@ -21,17 +21,44 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 1
 fi
 
-# Ollama holds the DJ. Start it if it is installed but not listening.
-if ! curl -sf --max-time 2 "${GEMRADIO_OLLAMA_HOST:-http://127.0.0.1:11434}/api/tags" >/dev/null 2>&1; then
-    if command -v ollama >/dev/null 2>&1; then
-        echo "Starting the local Ollama daemon…"
+OLLAMA_URL="${GEMRADIO_OLLAMA_HOST:-http://127.0.0.1:11434}"
+
+ollama_up() {
+    curl -sf --max-time 2 "$OLLAMA_URL/api/tags" >/dev/null 2>&1
+}
+
+wait_for_ollama() {
+    for _ in $(seq 1 30); do
+        ollama_up && return 0
+        sleep 0.5
+    done
+    return 1
+}
+
+# Ollama holds the DJ.  If it is not listening we must be careful how we start
+# it: on a machine where Ollama is a system service, its models live under the
+# service account, and launching our own `ollama serve` would take port 11434
+# from the service, leave it in a restart loop and hide every installed model.
+# So prefer the service, and only run our own daemon when there is no service
+# to run.
+if ! ollama_up; then
+    if command -v systemctl >/dev/null 2>&1 \
+       && systemctl list-unit-files ollama.service >/dev/null 2>&1 \
+       && systemctl cat ollama.service >/dev/null 2>&1; then
+        echo "Starting the Ollama system service…"
+        systemctl start ollama >/dev/null 2>&1 || true
+        if ! wait_for_ollama; then
+            echo "Ollama is installed as a system service but is not responding."
+            echo "Start it with:  sudo systemctl start ollama"
+            echo "The DJ will use its built-in fallback links until it is up."
+        fi
+    elif command -v ollama >/dev/null 2>&1; then
+        echo "Starting a local Ollama daemon…"
         (ollama serve >/dev/null 2>&1 &)
-        for _ in $(seq 1 20); do
-            sleep 0.5
-            curl -sf --max-time 2 "${GEMRADIO_OLLAMA_HOST:-http://127.0.0.1:11434}/api/tags" >/dev/null 2>&1 && break
-        done
+        wait_for_ollama || \
+            echo "Ollama did not come up — the DJ will use its built-in fallback links."
     else
-        echo "Note: Ollama is not running — the DJ will use its built-in fallback links."
+        echo "Note: Ollama is not installed — the DJ will use its built-in fallback links."
     fi
 fi
 

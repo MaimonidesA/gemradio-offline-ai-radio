@@ -92,7 +92,14 @@ WHISPER_THREADS = int(_env_float("GEMRADIO_WHISPER_THREADS", min(8, os.cpu_count
 WHISPER_SAMPLE_SECONDS = _env_float("GEMRADIO_WHISPER_SECONDS", 20.0)
 
 OLLAMA_HOST = os.environ.get("GEMRADIO_OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
-OLLAMA_MODEL = os.environ.get("GEMRADIO_OLLAMA_MODEL", "gemma4:latest")
+OLLAMA_MODEL = os.environ.get("GEMRADIO_OLLAMA_MODEL", "gemma4:12b-it-qat")
+
+# Context size decides whether the model reaches the GPU at all.  Ollama sizes
+# the KV cache from it, and a large window (the daemon here defaults to 16384
+# through OLLAMA_CONTEXT_LENGTH) pushes a 12B model past 8 GB of VRAM, so it
+# silently loads on the CPU instead — four times slower.  Every request asks
+# for its own num_ctx so the station never inherits that.
+OLLAMA_NUM_CTX = int(_env_float("GEMRADIO_NUM_CTX", 8192))
 OLLAMA_TIMEOUT = _env_float("GEMRADIO_OLLAMA_TIMEOUT", 180.0)
 # How long Ollama keeps the model resident after the last request.  The station
 # also unloads explicitly on shutdown so nothing is left holding RAM.
@@ -127,8 +134,8 @@ ARTIST_COOLDOWN = 5          # tracks before the same artist may return
 TRACK_HISTORY = 300          # tracks before the same file may return
 BLOCK_MIN_TRACKS = 5         # a "show block" keeps one language/identity
 BLOCK_MAX_TRACKS = 9
-TALK_EVERY_MIN = 1           # DJ speaks at least every N track boundaries
-TALK_EVERY_MAX = 2
+TALK_EVERY_MIN = 2           # DJ speaks at least every N track boundaries
+TALK_EVERY_MAX = 3
 
 # How far before the end of a track the DJ starts speaking, on top of the
 # measured speech duration.  The next song rises under the closing words.
@@ -159,24 +166,34 @@ class Profile:
     allow_duet: bool
     use_whisper: bool
     num_predict: int
+    num_ctx: int
     block_tracks: tuple[int, int]  # records per show before a new identity
     llm_show_names: bool
+    max_lines: int                # how many spoken lines a link may run to
+    words_per_line: int
+    total_words: int              # budget for the whole link, all lines together
+    max_speech_seconds: float     # hard cap; extra lines are dropped
     description: str
 
 
 PROFILES: dict[str, Profile] = {
     "full": Profile(
         key="full",
-        label="FULL",
-        model=OLLAMA_MODEL,
+        label="FULL POWER",
+        model=OLLAMA_MODEL,       # the bigger model, GPU-accelerated
         talk_every=(TALK_EVERY_MIN, TALK_EVERY_MAX),
         allow_duet=True,
         use_whisper=True,
-        num_predict=420,
+        num_predict=700,
+        num_ctx=OLLAMA_NUM_CTX,
         block_tracks=(BLOCK_MIN_TRACKS, BLOCK_MAX_TRACKS),
         llm_show_names=True,
-        description="Gemma writes every link, Whisper listens to each record, "
-                    "two hosts on English and French shows.",
+        max_lines=3,
+        words_per_line=26,
+        total_words=58,
+        max_speech_seconds=26.0,
+        description="The larger model on the GPU, longer and funnier links "
+                    "about both records, Whisper listening, two hosts.",
     ),
     "low": Profile(
         key="low",
@@ -186,8 +203,13 @@ PROFILES: dict[str, Profile] = {
         allow_duet=False,
         use_whisper=False,
         num_predict=200,
+        num_ctx=4096,
         block_tracks=(10, 16),
         llm_show_names=False,
+        max_lines=1,
+        words_per_line=30,
+        total_words=30,
+        max_speech_seconds=14.0,
         description="Smallest model, longer runs of music, one voice, "
                     "no Whisper pass.",
     ),

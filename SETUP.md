@@ -192,8 +192,50 @@ and if it is not finished in time the station simply crossfades without a link.
 
 ## 5. GPU notes
 
-**GemRadio does not need a GPU.** Everything works on a CPU, and on this
-machine that is exactly how it runs.
+### The context-length trap — read this if Ollama runs on the CPU
+
+The single biggest performance mistake is invisible: **Ollama sizes its KV
+cache from the context length, and a large context can push a model that would
+otherwise fit in VRAM onto the CPU.** It does this silently. Nothing errors;
+generation is simply four times slower.
+
+Measured here on an RTX 4070 Laptop (8 GB) with `gemma4:12b-it-qat`:
+
+| Context | Where it ran | VRAM | Speed |
+|---|---|---|---|
+| 16384 | **100% CPU** | — | 6.7 tok/s |
+| 8192 | 76% GPU | 6.5 GB | **28 tok/s** |
+| 4096 | 76% GPU | 6.4 GB | 29 tok/s |
+
+The 16384 came from `OLLAMA_CONTEXT_LENGTH=16384` in the service unit — a
+machine-wide default that silently applied to every model. GemRadio now sends
+its own `num_ctx` on **every** request so it can never inherit a value that
+costs it the GPU. Change it with `GEMRADIO_NUM_CTX` if you need a longer window.
+
+Check what your own daemon defaults to:
+
+```bash
+systemctl show ollama --property=Environment | tr ' ' '\n' | grep -i context
+```
+
+And confirm where a model actually landed — the `PROCESSOR` column is the truth:
+
+```bash
+ollama ps
+# NAME               SIZE    PROCESSOR         CONTEXT
+# gemma4:12b-it-qat  8.5 GB  24%/76% CPU/GPU   8192
+```
+
+`./run_gemradio.sh doctor` prints the same thing as `currently loaded on:`, and
+the front panel shows it next to the model name in the status bar.
+
+If a model still will not fit, use a smaller one, a smaller quantization, or
+lower `GEMRADIO_NUM_CTX`. A partial offload like 76% is normal and still a
+large win — the layers that fit run on the GPU.
+
+### Everything else
+
+**GemRadio does not need a GPU.** Every component works on a CPU.
 
 - **Piper** synthesizes about 30× faster than real time on a CPU. GPU support
   exists but is not worth chasing; if ONNX Runtime cannot reach your GPU it
@@ -204,7 +246,13 @@ machine that is exactly how it runs.
   so it will run on the CPU — that is normal, and the station is built to hide
   the latency by preparing every link while the previous record is still
   playing.
-- **whisper.cpp** needs the `-DGGML_CUDA=1` build above to use a GPU.
+- **whisper.cpp** needs the `-DGGML_CUDA=1` build above to use a GPU. A build
+  made without it is CPU-only no matter what hardware you have, and it will not
+  tell you. Check the binary rather than assuming:
+
+  ```bash
+  ldd $(which whisper-cli) | grep -ci cuda   # 0 means CPU-only
+  ```
 
 Check what actually happened:
 
@@ -297,6 +345,8 @@ Exec=env GEMRADIO_MUSIC_DIR=/media/big-disk/music /path/to/run_gemradio.sh
 | Garbled non-Latin tags | Expected for old Windows-written files; GemRadio repairs cp1255/cp1251 automatically |
 | Long gaps before the DJ speaks | CPU-bound models. Turn on low power, or `GEMRADIO_WHISPER=0` |
 | Ollama keeps holding RAM after closing | Should not happen — the station unloads on exit. Check with `ollama ps`; `GEMRADIO_KEEP_ALIVE=0` makes it immediate |
+| `ollama list` suddenly shows no models | A second `ollama serve` has taken port 11434 from the system service, and it looks in a different model directory. `pgrep -af "ollama serve"`, kill the stray one, then `systemctl start ollama` |
+| Model runs on CPU despite a capable GPU | Context length — see [the GPU notes](#5-gpu-notes) |
 
 Full log: `~/.local/share/gemradio/gemradio.log`. Run with `GEMRADIO_DEBUG=1`
 for the verbose version.

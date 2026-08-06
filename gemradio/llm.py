@@ -95,6 +95,31 @@ class Ollama:
         pool.sort(key=lambda m: (m["parameters"] or float("inf"), m["size"]))
         return pool[0]["name"]
 
+    def placement(self) -> str:
+        """Where the loaded model actually sits: '76% GPU', 'CPU', or ''.
+
+        Ollama decides this at load time from how much of the model plus its
+        KV cache fits in VRAM, and reports it per running model.  Showing it
+        is the only way to know the GPU is really being used.
+        """
+        try:
+            running = self._get("/api/ps", timeout=3.0).get("models", [])
+        except Exception:
+            return ""
+        for m in running:
+            if m.get("name") != self.model and m.get("model") != self.model:
+                continue
+            total = m.get("size") or 0
+            vram = m.get("size_vram") or 0
+            if not total:
+                return ""
+            if vram <= 0:
+                return "CPU"
+            if vram >= total:
+                return "100% GPU"
+            return f"{round(100 * vram / total)}% GPU"
+        return ""
+
     def set_model(self, name: str) -> None:
         if name and name != self.model:
             log.info("DJ brain switching to %s", name)
@@ -145,6 +170,7 @@ class Ollama:
     # -- generation ---------------------------------------------------------
     def chat_json(self, system: str, user: str, schema: dict,
                   temperature: float = 0.95, num_predict: int = 400,
+                  num_ctx: int | None = None,
                   timeout: float | None = None) -> dict[str, Any] | None:
         payload = {
             "model": self.model,
@@ -159,6 +185,10 @@ class Ollama:
                 "temperature": temperature,
                 "top_p": 0.95,
                 "num_predict": num_predict,
+                # Sent on every call: inheriting the daemon's large default
+                # window would size the KV cache past this GPU and drop the
+                # model onto the CPU.
+                "num_ctx": int(num_ctx or config.OLLAMA_NUM_CTX),
                 "repeat_penalty": 1.15,
             },
             "keep_alive": config.OLLAMA_KEEP_ALIVE,
