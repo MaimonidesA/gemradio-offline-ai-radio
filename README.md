@@ -111,8 +111,12 @@ towards whatever Whisper actually heard in the upcoming records.
 ## Layout
 
 ```
+run_gemradio.sh   launcher: starts Ollama if needed, clears proxy vars
+install_desktop.sh  adds/removes the applications-menu entry and icon
+SETUP.md          installing on a fresh machine, GPU and CPU
 gemradio/
-  config.py       paths, voices, all tunables (every one has an env override)
+  assets/         the radio icon
+  config.py       paths, voices, profiles, all tunables (env overridable)
   library.py      scanner, SQLite index, cover art, tag repair
   audio.py        the mixer: decks, crossfade, ducking, sink
   tts.py          Piper client, resampling, cache

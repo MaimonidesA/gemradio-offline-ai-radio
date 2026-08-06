@@ -523,7 +523,7 @@ class RadioWindow(QWidget):
         self.volume = QSlider(Qt.Horizontal)
         self.volume.setRange(0, 100)
         self.volume.setValue(int(config.MASTER_VOLUME * 100))
-        self.volume.setFixedWidth(150)
+        self.volume.setFixedWidth(118)
         self.volume.valueChanged.connect(lambda v: self.station.set_volume(v / 100.0))
         controls.addWidget(self.volume)
 
@@ -633,11 +633,12 @@ class RadioWindow(QWidget):
             bits.append("CROSSFADE")
         self.ticker.setText("     ·     ".join(bits))
 
-        status = [s["status"], s["profile_label"]]
+        # The profile is not repeated here: the LOW POWER button already shows it.
+        status = [s["status"]]
         if s["scanning"]:
             done, total = s["scan_progress"]
             status.append(f"indexing {done}/{total}")
-        status.append(f"DJ: {s['brain']}")
+        status.append(f"DJ: {s['model'] or s['brain']}")
         self.status_label.setText("   |   ".join(status))
 
     def closeEvent(self, event):
