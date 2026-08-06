@@ -116,6 +116,10 @@ happens on Ctrl-C, on `SIGTERM`, and on session logout — the handler is wired
 to the window close, to Qt's `aboutToQuit`, and to an `atexit` hook, and is safe
 to run more than once.
 
+In `headless` the signal handler only raises a flag; the loop notices it and
+the `finally` does the teardown, because unwinding from inside a handler can
+land in the middle of interpreter shutdown.
+
 Check that nothing was left behind:
 
 ```bash

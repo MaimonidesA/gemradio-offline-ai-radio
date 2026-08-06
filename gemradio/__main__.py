@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import signal
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -103,10 +104,16 @@ def cmd_headless(minutes: float, profile: str | None = None) -> int:
         cmd_scan()
     station = Station(lib, profile=profile)
 
+    # A signal handler must not tear the station down itself: raising
+    # SystemExit from inside one can land in the middle of interpreter
+    # shutdown.  It just asks the loop below to finish, and the `finally`
+    # does the real work.
+    stopping = threading.Event()
+
     def handler(*_):
-        print("\nshutting down…")
-        station.shutdown()
-        sys.exit(0)
+        if not stopping.is_set():
+            print("\nshutting down…", flush=True)
+        stopping.set()
 
     signal.signal(signal.SIGINT, handler)
     signal.signal(signal.SIGTERM, handler)
@@ -115,7 +122,7 @@ def cmd_headless(minutes: float, profile: str | None = None) -> int:
     deadline = time.time() + minutes * 60 if minutes > 0 else float("inf")
     last_track = last_speech = ""
     try:
-        while time.time() < deadline:
+        while time.time() < deadline and not stopping.is_set():
             s = station.snapshot()
             track = f"{s['show']} | {s['artist']} — {s['title']}"
             if track != last_track and s["title"]:
@@ -125,7 +132,7 @@ def cmd_headless(minutes: float, profile: str | None = None) -> int:
             if speech and speech != last_speech:
                 last_speech = speech
                 print(f"  🎙 {s['on_air_voice']}: {speech}", flush=True)
-            time.sleep(0.4)
+            stopping.wait(0.4)
     finally:
         station.shutdown()
     return 0
