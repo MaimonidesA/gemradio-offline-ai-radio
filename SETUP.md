@@ -348,6 +348,9 @@ Exec=env GEMRADIO_MUSIC_DIR=/media/big-disk/music /path/to/run_gemradio.sh
 | Symptom | Cause and fix |
 |---|---|
 | `no audio sink found` | No `paplay`/`pw-play`/`aplay`. `sudo apt install pulseaudio-utils alsa-utils` |
+| OUTPUT dropdown is greyed out | Needs `paplay` or `pw-play`; with only `aplay` the station follows the system default |
+| A Bluetooth speaker is missing from OUTPUT | Connect it first, then reopen the dropdown — the list is rebuilt each time |
+| The DJ is too quiet under the music | Raise `GEMRADIO_VOICE_GAIN` (default 1.25) or lower `GEMRADIO_DUCK_LEVEL` (default 0.15) |
 | Music plays, DJ never speaks | No Piper voice found. `./run_gemradio.sh doctor` lists what it sees; check `GEMRADIO_PIPER_VOICES` |
 | DJ says only short generic lines | Ollama is not running. `ollama serve`, then check `curl localhost:11434/api/tags` |
 | DJ says nothing at all and the log shows empty responses | You are calling a thinking model without `"think": false` |

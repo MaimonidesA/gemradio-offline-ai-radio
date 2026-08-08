@@ -115,11 +115,18 @@ BLOCK_FRAMES = 1024                       # 21.3 ms per mix block
 SINK_LATENCY_MS = int(_env_float("GEMRADIO_SINK_LATENCY_MS", 220))
 
 CROSSFADE_SECONDS = _env_float("GEMRADIO_CROSSFADE", 7.0)
-DUCK_LEVEL = _env_float("GEMRADIO_DUCK_LEVEL", 0.20)      # ~ -14 dB under speech
+DUCK_LEVEL = _env_float("GEMRADIO_DUCK_LEVEL", 0.15)      # ~ -16 dB under speech
 DUCK_ATTACK_SECONDS = _env_float("GEMRADIO_DUCK_ATTACK", 0.9)
 DUCK_RELEASE_SECONDS = _env_float("GEMRADIO_DUCK_RELEASE", 2.2)
 DUCK_HOLD_SECONDS = _env_float("GEMRADIO_DUCK_HOLD", 0.5)
-VOICE_GAIN = _env_float("GEMRADIO_VOICE_GAIN", 1.0)
+
+# The DJ has to stay clearly audible when the music is set quiet enough to work
+# as background.  Three things set that balance: how loudly speech is
+# normalised, how much gain it gets in the mix, and how far the music ducks
+# beneath it.  Together these put the voice roughly 17 dB over the music.
+VOICE_LOUDNESS_LUFS = _env_float("GEMRADIO_VOICE_LOUDNESS", -13.0)
+VOICE_PEAK_DB = _env_float("GEMRADIO_VOICE_PEAK", -2.5)
+VOICE_GAIN = _env_float("GEMRADIO_VOICE_GAIN", 1.25)
 MUSIC_GAIN = _env_float("GEMRADIO_MUSIC_GAIN", 0.82)
 MASTER_VOLUME = _env_float("GEMRADIO_VOLUME", 0.85)
 DECK_PREBUFFER_SECONDS = 2.0
@@ -315,3 +322,34 @@ def pick_voice(language: str, gender: str) -> Voice | None:
 def ensure_dirs() -> None:
     for d in (STATE_DIR, CACHE_DIR, COVER_DIR, TTS_DIR):
         d.mkdir(parents=True, exist_ok=True)
+
+
+# --------------------------------------------------------------------------
+# Small persisted preferences (choices made in the panel, not in the config)
+# --------------------------------------------------------------------------
+
+SETTINGS_PATH = STATE_DIR / "settings.json"
+
+
+def load_settings() -> dict:
+    try:
+        import json
+        with open(SETTINGS_PATH, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_settings(values: dict) -> None:
+    try:
+        import json
+        ensure_dirs()
+        current = load_settings()
+        current.update(values)
+        tmp = SETTINGS_PATH.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(current, fh, indent=2)
+        tmp.replace(SETTINGS_PATH)
+    except Exception:
+        pass

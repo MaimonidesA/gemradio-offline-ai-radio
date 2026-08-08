@@ -127,6 +127,35 @@ ollama ps                     # should list nothing
 pgrep -af "piper_worker|paplay"   # should print nothing
 ```
 
+## Choosing where it plays
+
+The **OUTPUT** dropdown sends the station to any connected speaker — built-in,
+Bluetooth, HDMI — **without touching the system default**. Everything else on
+the computer keeps playing where it was; only the radio moves. Pick the laptop
+speakers for the radio and leave Bluetooth for the rest, or the reverse.
+
+Switching while on air is seamless: the station asks PulseAudio to move its own
+stream (`pactl move-sink-input`), which does not interrupt playback. Only if
+that is unavailable does it reopen its output, which costs a short gap. The
+list is rebuilt each time the dropdown is opened, so a Bluetooth speaker that
+connects mid-programme appears without a restart, and the choice is remembered
+in `~/.local/share/gemradio/settings.json`.
+
+## Speech level
+
+The DJ has to stay audible with the music set quiet enough to work as
+background. Three settings decide that, and together they put the voice about
+**15 dB** over the ducked music:
+
+| | Default | What it does |
+|---|---|---|
+| `GEMRADIO_VOICE_LOUDNESS` | −13 LUFS | how loudly speech is normalised |
+| `GEMRADIO_VOICE_GAIN` | 1.25 | its gain in the mix |
+| `GEMRADIO_DUCK_LEVEL` | 0.15 | how far the music drops beneath it |
+
+Raise `GEMRADIO_VOICE_GAIN` for more voice, or lower `GEMRADIO_DUCK_LEVEL` to
+push the music further down instead of bringing the voice further up.
+
 ## Titles the announcer cannot read
 
 A personal collection is not all in one language. This one holds Hebrew, French

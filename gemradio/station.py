@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import config, lyrics
-from .audio import AudioEngine, VoiceItem
+from .audio import AudioEngine, VoiceItem, list_output_devices
 from .director import Director, Script, Show
 from .library import Library, Track
 from .llm import Ollama
@@ -62,7 +62,11 @@ class Station:
         self.profile = config.PROFILES[profile or config.DEFAULT_PROFILE]
         self.director = Director(self.library, self.brain, self.profile)
         self.tts = PiperTTS()
-        self.engine = AudioEngine(on_event=self._on_engine_event)
+        self._settings = config.load_settings()
+        self.engine = AudioEngine(
+            on_event=self._on_engine_event,
+            device=str(self._settings.get("output_device", "")),
+        )
 
         self._lock = threading.RLock()
         self._running = False
@@ -472,6 +476,16 @@ class Station:
     def set_volume(self, value: float) -> None:
         self.engine.set_volume(value)
 
+    def set_output_device(self, name: str) -> bool:
+        """Send only the station's audio to a chosen output, and remember it."""
+        ok = self.engine.set_device(name)
+        if ok:
+            config.save_settings({"output_device": name})
+        return ok
+
+    def output_devices(self) -> list[tuple[str, str]]:
+        return list_output_devices()
+
     def snapshot(self) -> dict:
         state = self.engine.state()
         with self._lock:
@@ -518,6 +532,7 @@ class Station:
             "duck": state.duck,
             "vu": (state.vu_left, state.vu_right),
             "volume": state.volume,
+            "device": state.device,
             "brain": self.brain.detail if self.brain.available else "offline (fallback links)",
             "scanning": self.library.scanning,
             "scan_progress": (scanned, total),

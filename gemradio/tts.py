@@ -209,7 +209,8 @@ class PiperTTS:
         """Resample Piper's 22.05 kHz mono to the mixer's 48 kHz stereo."""
         cmd = [
             config.FFMPEG, "-v", "quiet", "-nostdin", "-i", str(wav_path),
-            "-af", "loudnorm=I=-17:TP=-2:LRA=9",
+            "-af", (f"loudnorm=I={config.VOICE_LOUDNESS_LUFS}"
+                    f":TP={config.VOICE_PEAK_DB}:LRA=9"),
             "-f", "f32le", "-acodec", "pcm_f32le",
             "-ar", str(SR), "-ac", str(CH), "-",
         ]

@@ -223,9 +223,67 @@ class VoiceItem:
 # Engine state snapshot
 # --------------------------------------------------------------------------
 
+# --------------------------------------------------------------------------
+# Output devices
+# --------------------------------------------------------------------------
+
+STREAM_NAME = "GemRadio"
+
+
+def list_output_devices() -> list[tuple[str, str]]:
+    """Available sinks as (name, description), best-effort.
+
+    An empty name means "whatever the system default is", which is the entry
+    the station starts on.
+    """
+    devices: list[tuple[str, str]] = [("", "System default")]
+    if not shutil.which("pactl"):
+        return devices
+    try:
+        out = subprocess.run(["pactl", "list", "sinks"], capture_output=True,
+                             text=True, timeout=5).stdout
+    except Exception:
+        return devices
+    name = ""
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("Name:"):
+            name = line.split(":", 1)[1].strip()
+        elif line.startswith("Description:") and name:
+            devices.append((name, line.split(":", 1)[1].strip()))
+            name = ""
+    return devices
+
+
+def default_sink() -> str:
+    try:
+        return subprocess.run(["pactl", "get-default-sink"], capture_output=True,
+                              text=True, timeout=5).stdout.strip()
+    except Exception:
+        return ""
+
+
+def _find_our_sink_input() -> str:
+    """Index of the station's own playback stream, by its media name."""
+    try:
+        out = subprocess.run(["pactl", "list", "sink-inputs"], capture_output=True,
+                             text=True, timeout=5).stdout
+    except Exception:
+        return ""
+    index = ""
+    for line in out.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Sink Input #"):
+            index = stripped.split("#", 1)[1].strip()
+        elif f'media.name = "{STREAM_NAME}"' in stripped and index:
+            return index
+    return ""
+
+
 @dataclass
 class EngineState:
     running: bool = False
+    device: str = ""
     track_path: str = ""
     position: float = 0.0
     duration: float = 0.0
@@ -242,8 +300,10 @@ class EngineState:
 class AudioEngine:
     """Mixes music and speech and pushes the result to the system audio sink."""
 
-    def __init__(self, on_event: Callable[[str, dict], None] | None = None):
+    def __init__(self, on_event: Callable[[str, dict], None] | None = None,
+                 device: str = ""):
         self.on_event = on_event
+        self._device = device
         self._lock = threading.RLock()
         self._decks: list[Deck] = []
         self._voice: deque[VoiceItem] = deque()
@@ -262,30 +322,113 @@ class AudioEngine:
         self._thread: threading.Thread | None = None
         self._sink: subprocess.Popen | None = None
         self._paused = False
-        self._sink_cmd = self._choose_sink()
+        self._sink_cmd = self._choose_sink(device)
 
     # -- sink ---------------------------------------------------------------
     @staticmethod
-    def _choose_sink() -> list[str]:
+    def _choose_sink(device: str = "") -> list[str]:
         lat = str(config.SINK_LATENCY_MS)
         if shutil.which("paplay"):
-            return ["paplay", "--raw", "--format=s16le", f"--rate={SR}",
-                    f"--channels={CH}", f"--latency-msec={lat}",
-                    "--stream-name=GemRadio"]
+            cmd = ["paplay", "--raw", "--format=s16le", f"--rate={SR}",
+                   f"--channels={CH}", f"--latency-msec={lat}",
+                   f"--stream-name={STREAM_NAME}"]
+            if device:
+                cmd.append(f"--device={device}")
+            return cmd
         if shutil.which("pw-play"):
-            return ["pw-play", "--format=s16", f"--rate={SR}", f"--channels={CH}",
-                    "--raw", "-"]
+            cmd = ["pw-play", "--format=s16", f"--rate={SR}", f"--channels={CH}"]
+            if device:
+                cmd.append(f"--target={device}")
+            return cmd + ["-"]
         if shutil.which("aplay"):
             return ["aplay", "-q", "-t", "raw", "-f", "S16_LE", "-r", str(SR),
                     "-c", str(CH), "-"]
         raise RuntimeError("no audio sink found (need paplay, pw-play or aplay)")
 
+    @staticmethod
+    def device_selection_supported() -> bool:
+        return bool(shutil.which("paplay") or shutil.which("pw-play"))
+
     def _open_sink(self) -> None:
+        self._sink_cmd = self._choose_sink(self._device)
         log.info("audio sink: %s", " ".join(self._sink_cmd))
         self._sink = subprocess.Popen(
             self._sink_cmd, stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
+
+    @property
+    def device(self) -> str:
+        return self._device
+
+    def set_device(self, name: str) -> bool:
+        """Send the station's audio to a particular output, and only ours.
+
+        Preferred route is asking PulseAudio to move our existing stream, which
+        is seamless and leaves every other application where it is.  If that is
+        not possible the sink process is reopened instead, which costs a short
+        gap but has the same effect.
+        """
+        name = name or ""
+        with self._lock:
+            self._device = name
+            running = self._running and self._sink is not None
+
+        target = name or default_sink()
+        if running and target and shutil.which("pactl"):
+            index = _find_our_sink_input()
+            if index:
+                try:
+                    done = subprocess.run(
+                        ["pactl", "move-sink-input", index, target],
+                        capture_output=True, timeout=5)
+                    if done.returncode == 0:
+                        log.info("output moved to %s", target)
+                        return True
+                    log.debug("move-sink-input failed: %s",
+                              done.stderr.decode(errors="replace").strip())
+                except Exception:
+                    log.debug("move-sink-input raised", exc_info=True)
+
+        if running:
+            return self._reopen_sink()
+        return True
+
+    def _reopen_sink(self) -> bool:
+        """Swap the sink process under the mixer, keeping the stream going."""
+        old = self._sink
+        try:
+            new_cmd = self._choose_sink(self._device)
+            new = subprocess.Popen(new_cmd, stdin=subprocess.PIPE,
+                                   stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+        except Exception:
+            log.exception("could not open the new output")
+            return False
+        with self._lock:
+            self._sink_cmd = new_cmd
+            self._sink = new
+        if old:
+            try:
+                if old.stdin:
+                    old.stdin.close()
+            except Exception:
+                pass
+            threading.Thread(target=self._close_process, args=(old,),
+                             daemon=True).start()
+        log.info("output reopened on %s", self._device or "system default")
+        return True
+
+    @staticmethod
+    def _close_process(proc: subprocess.Popen) -> None:
+        try:
+            proc.terminate()
+            proc.wait(timeout=3)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
 
     # -- lifecycle ----------------------------------------------------------
     def start(self) -> None:
@@ -405,6 +548,7 @@ class AudioEngine:
             crossfading = sum(1 for d in self._decks if not d.finished and d.gain > 0.02) > 1
             return EngineState(
                 running=self._running,
+                device=self._device,
                 track_path=primary.path if primary else "",
                 position=primary.position if primary else 0.0,
                 duration=primary.duration if primary else 0.0,

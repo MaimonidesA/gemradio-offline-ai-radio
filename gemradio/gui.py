@@ -18,9 +18,9 @@ from PyQt5.QtCore import (QPointF, QRectF, Qt, QTimer, pyqtSignal)
 from PyQt5.QtGui import (QBrush, QColor, QFont, QFontDatabase, QIcon,
                          QLinearGradient, QPainter, QPainterPath, QPen, QPixmap,
                          QRadialGradient)
-from PyQt5.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel,
-                             QPushButton, QSizePolicy, QSlider, QVBoxLayout,
-                             QWidget)
+from PyQt5.QtWidgets import (QApplication, QComboBox, QFrame, QHBoxLayout,
+                             QLabel, QPushButton, QSizePolicy, QSlider,
+                             QVBoxLayout, QWidget)
 
 from . import config
 from .library import Library
@@ -304,6 +304,48 @@ class ProgressBar(QWidget):
                        QBrush(grad))
 
 
+class OutputChooser(QComboBox):
+    """Picks which speaker the station plays through, on its own.
+
+    The list is rebuilt every time it is opened, because Bluetooth and HDMI
+    outputs appear and disappear while the radio is running.
+    """
+
+    def __init__(self, station: Station):
+        super().__init__()
+        self.station = station
+        self._loading = False
+        self.setMinimumWidth(168)
+        self.setMaxVisibleItems(12)
+        self.reload()
+        self.currentIndexChanged.connect(self._changed)
+
+    def showPopup(self):
+        self.reload()
+        super().showPopup()
+
+    def reload(self) -> None:
+        current = self.station.engine.device
+        self._loading = True
+        try:
+            self.clear()
+            for name, description in self.station.output_devices():
+                self.addItem(description, name)
+            index = self.findData(current)
+            self.setCurrentIndex(index if index >= 0 else 0)
+        finally:
+            self._loading = False
+
+    def _changed(self, _index: int) -> None:
+        if self._loading:
+            return
+        name = self.currentData()
+        if name is None:
+            return
+        if not self.station.set_output_device(name):
+            log.warning("could not switch output to %s", name or "system default")
+
+
 class SectionLabel(QLabel):
     def __init__(self, text: str):
         super().__init__(text)
@@ -351,6 +393,16 @@ class RadioWindow(QWidget):
                 background: #d9a24e; width: 13px; margin: -6px 0; border-radius: 6px;
             }}
             QSlider::sub-page:horizontal {{ background: #8a5f2a; border-radius: 2px; }}
+            QComboBox {{
+                background: #3a2b20; border: 1px solid #6b5030; border-radius: 5px;
+                color: #e8d6b2; padding: 5px 8px;
+            }}
+            QComboBox:disabled {{ color: #6d5b44; border-color: #4a3a2a; }}
+            QComboBox::drop-down {{ border: none; width: 18px; }}
+            QComboBox QAbstractItemView {{
+                background: #2c2018; color: #e8d6b2;
+                selection-background-color: #5a4118; border: 1px solid #6b5030;
+            }}
         """)
 
         root = QVBoxLayout(self)
@@ -507,6 +559,7 @@ class RadioWindow(QWidget):
 
         self.btn_power = QPushButton("◐  LOW POWER")
         self.btn_power.setCheckable(True)
+        self.btn_power.setMinimumWidth(150)
         self.btn_power.setChecked(self.station.profile.key == "low")
         self.btn_power.setToolTip(
             "Smallest installed model, longer runs of music between links, "
@@ -527,14 +580,30 @@ class RadioWindow(QWidget):
         self.volume.valueChanged.connect(lambda v: self.station.set_volume(v / 100.0))
         controls.addWidget(self.volume)
 
+        controls.addSpacing(14)
+        out_label = QLabel("OUTPUT")
+        out_label.setFont(_font(7, QFont.Bold, spacing=40))
+        out_label.setStyleSheet("color: #8a6f4c;")
+        controls.addWidget(out_label)
+        self.output = OutputChooser(self.station)
+        self.output.setEnabled(self.station.engine.device_selection_supported())
+        self.output.setToolTip(
+            "Send only the radio to this speaker. Everything else on the "
+            "computer keeps using the system default."
+        )
+        controls.addWidget(self.output)
+
         controls.addStretch(1)
+        root.addLayout(controls)
+
+        # The status line gets a row of its own: crowded onto the button row it
+        # collided with the output chooser and truncated the buttons.
         self.status_label = QLabel("Ready")
         self.status_label.setFont(_font(8, mono=True))
         self.status_label.setStyleSheet("color: #8a6f4c;")
         self.status_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.status_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        controls.addWidget(self.status_label)
-        root.addLayout(controls)
+        root.addWidget(self.status_label)
 
     # -- painting the wooden case ------------------------------------------
     def paintEvent(self, _):
